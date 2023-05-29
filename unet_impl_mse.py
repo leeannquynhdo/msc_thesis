@@ -23,7 +23,7 @@ from matplotlib import pyplot as plt
 
 # train the model?
 
-should_train = True
+should_train = False
 
 path_to_model = 'unet_models/trained_unet_model_mse.pth'
 path_to_train_loss = 'unet_models/unet_all_train_losses_mse.txt'
@@ -269,7 +269,7 @@ if should_train:
 
 # load the trained model
 trained_model = unet().to(device)
-trained_model.load_state_dict(torch.load(path_to_model)) # path to trained model 
+trained_model.load_state_dict(torch.load(path_to_model, map_location=device)) # path to trained model 
 
 def test_step(model, dataset):
     model.eval()
@@ -363,9 +363,37 @@ labels = torch.stack(re_test_labels)
 predictions = predictions.squeeze().view(-1)
 labels = labels.squeeze().view(-1)
 
+from sklearn.metrics import roc_curve, roc_auc_score
+fpr, tpr, ts = roc_curve(labels.int().view(-1).numpy(), predictions.view(-1).numpy())
+auc = roc_auc_score(labels.int().view(-1).numpy(), predictions.view(-1).numpy())
+
+plt.title('U-Net MSE ROC curve')
+plt.plot(fpr, tpr, label=f'AUC score = {auc}')
+plt.legend()
+plt.savefig('unet_models/roc_curve_mse.png', dpi=500, bbox_inches='tight')
+plt.close()
+
 
 predictions = (predictions > 0.5).float()
 
+print("U-Net MSE")
+
 accuracy = torch.eq(predictions, labels).sum().item() / len(predictions)
-with open(f'unet_models/unet_accuracy_mse.txt', 'w') as f:
-    f.write("%s\n" % accuracy)
+# with open(f'unet_models/unet_accuracy_mse.txt', 'w') as f:
+#     f.write("%s\n" % accuracy)
+
+print("accuracy:", accuracy)
+
+def calculate_iou(pred, target):
+    intersection = torch.logical_and(pred, target).sum()
+    union = torch.logical_or(pred, target).sum()
+    iou = intersection.float() / union.float()
+    return iou
+
+iou = calculate_iou(predictions, labels)
+print("iou:", iou)
+
+from sklearn.metrics import f1_score
+
+f1 = f1_score(labels.int(), predictions.int())
+print("f1:", f1)
