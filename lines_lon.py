@@ -16,14 +16,14 @@ import numpy as np
 from matplotlib import pyplot as plt
 
 
-should_train = True
+should_train = False
 
-path_to_trained_model =  'line_unet/line_models/line_lon_model.pth'
+path_to_trained_model = 'line_unet/line_models/line_lon_model.pth'
 path_to_train_loss = 'line_unet/line_models/line_lon_train_losses.txt'
 path_to_val_loss = 'line_unet/line_models/line_lon_val_losses.txt'
 
 
-class hist_activation(nn.Module):
+class HistActivation(nn.Module):
     def __init__(self):
         super().__init__()
 
@@ -40,19 +40,19 @@ class Hist(nn.Module):
     def __init__(self,nBins=10,KSize=(3,3),WSize=(3,3)):
         super().__init__()
         self.nBins = nBins
-        self.b = nn.Parameter(torch.randn(nBins))
-        self.K = nn.Parameter(torch.randn(1,1,*KSize)) # learnable kernel init
-        self.W = nn.Parameter(torch.randn(1,1,*WSize)) # kernel init
-        self.act = hist_activation()
+        self.b = nn.Parameter(torch.randn(nBins)).to(device)
+        self.K = nn.Parameter(torch.randn(1,1,*KSize)).to(device) # learnable kernel init
+        self.W = nn.Parameter(torch.randn(1,1,*WSize)).to(device) # kernel init
+        self.act = HistActivation()
         # reordering kernel W to save time in forward()
         self.V = torch.cat([self.W for i in range(nBins)],dim=0)
         self.bias = self.b.view(1,nBins,1,1)
 
     def forward(self, I):
-        IK = nn.functional.conv2d(I, self.K, None, stride=1, padding=1)
-#        X = [nn.functional.conv2d(self.act(b-IK), self.W, None, stride=1, padding=1) for b in self.bias]
-#        X = torch.cat(X,1)
-        X = nn.functional.conv2d(self.act(self.bias-IK), self.V, None, padding='same', groups=self.nBins)
+        IK = nn.functional.conv2d(I.to(device), self.K, 
+                                  None, stride=1, padding=1)
+        X = nn.functional.conv2d(self.act(self.bias-IK), self.V, 
+                                 None, padding='same', groups=self.nBins)
         return X
 
 class LON(nn.Module):
@@ -79,16 +79,16 @@ class Dataset(Dataset):
         id = self.ids[index]
 
         X = TF.to_tensor(Image.open(f"line_unet/line_images/img_{id}.png"))
-        y = TF.to_tensor(Image.open(f"line_unet/line_images/mask_{id}.png"))
+        y = TF.to_tensor(Image.open(f"line_unet/line_images/gms_{id}.png"))
         
         return X, y
 
 
 params = {"batch_size": 1, 
           "shuffle": True,
-          "num_workers": 2,}
+          "num_workers": 4}
 
-all_ids = range(1000)
+all_ids = range(500)
 
 # Define the split lengths
 train_len = int(len(all_ids) * 0.6)
@@ -106,12 +106,9 @@ validation_generator = DataLoader(val_data, **params)
 test_generator = DataLoader(test_data, **params)
 
 
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device='cpu'
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 lon_model = LON(2,10,1)
 lon_model.to(device)
-for param in lon_model.parameters():
-    param.to(device)
 loss_func = nn.MSELoss().to(device)
 optimizer = optim.Adam(lon_model.parameters(), lr=0.001)
 
@@ -226,6 +223,8 @@ def test_step(model, dataset):
 
 test_images, test_labels, test_outputs, test_loss = test_step(trained_model, test_generator)
 
+
+
 for i in range(len(test_images)):
     fig, ax = plt.subplots(1,3,figsize=(15,5))
     ax[0].imshow(test_images[i].squeeze(0).permute(1,2,0), cmap='gray')
@@ -254,8 +253,37 @@ plt.close()
 predictions = torch.stack(test_outputs)
 labels = torch.stack(test_labels)
 
-# predictions = (predictions > 0.5)
+# from sklearn.metrics import roc_curve, roc_auc_score
+# fpr, tpr, ts = roc_curve(labels.int().view(-1).numpy(), predictions.view(-1).numpy())
+# auc = roc_auc_score(labels.int().view(-1).numpy(), predictions.view(-1).numpy())
 
-accuracy = torch.eq(predictions, labels).sum().item() / len(predictions)
-with open('line_unet/line_models/line_lon_accuracy.txt', 'w') as f:
-    f.write("%s\n" % accuracy)
+# plt.title('LON lines ROC curve')
+# plt.plot(fpr, tpr, label=f'AUC score = {auc}')
+# plt.legend()
+# plt.savefig('line_unet/line_models/lon_roc_curve.png', dpi=500, bbox_inches='tight')
+# plt.close()
+
+# predictions = (predictions > 0.5)
+# print('predictions:', predictions)
+# print('predictions min:', predictions.min())
+# print('predictions max:', predictions.max)
+
+# print("LON lines")
+
+# accuracy = torch.eq(predictions, labels).sum().item() / len(predictions)
+
+# print("accuracy:", accuracy)
+
+# def calculate_iou(pred, target):
+#     intersection = torch.logical_and(pred, target).sum()
+#     union = torch.logical_or(pred, target).sum()
+#     iou = intersection.float() / union.float()
+#     return iou
+
+# iou = calculate_iou(predictions, labels)
+# print("iou:", iou)
+
+# from sklearn.metrics import f1_score
+
+# f1 = f1_score(labels.int(), predictions.int())
+# print("f1:", f1)
