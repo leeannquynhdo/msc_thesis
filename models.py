@@ -143,3 +143,121 @@ class unet_convnext(nn.Module):
         output = self.last(d3)
 
         return torch.sigmoid(output)
+    
+    
+class HistActivation(nn.Module):
+    def __init__(self):
+        super().__init__()
+
+    def sigmoid(self, x):
+        return 1 / (1 + torch.exp(-x))
+
+    def sigmoid_derivative(self, x):
+        return self.sigmoid(x) * (1 - self.sigmoid(x))
+    
+    def forward(self, x):
+        return self.sigmoid_derivative(x)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+class Hist(nn.Module):
+    def __init__(self,nBins=10,KSize=(3,3),WSize=(3,3)):
+        super().__init__()
+        self.nBins = nBins
+        self.b = nn.Parameter(torch.randn(nBins)).to(device)
+        self.K = nn.Parameter(torch.randn(1,1,*KSize)).to(device) # kernel init
+        self.W = nn.Parameter(torch.randn(1,1,*WSize)).to(device) # kernel init
+        self.act = HistActivation()
+        # reordering to save time in forward()
+        self.V = torch.cat([self.W for i in range(nBins)],dim=0)
+        self.bias = self.b.view(1,nBins,1,1)
+
+    def forward(self, I):
+        IK = nn.functional.conv2d(I.to(device), self.K, None, stride=1, padding=1)
+        X = nn.functional.conv2d(self.act(self.bias - IK), self.V, None, padding='same', groups=self.nBins)
+        return X
+
+class LON(nn.Module):
+    def __init__(self, nKernels, nBins, nOut):
+        super().__init__()
+        self.convs = nn.ModuleList([Hist(nBins) for i in range(nKernels)])
+        self.lin = nn.Linear(nKernels*nBins,nOut)
+
+    def forward(self, X):
+        X = [h(X) for h in self.convs]
+        X = torch.cat(X,1)
+        X = torch.permute(self.lin(torch.permute(X,(0,2,3,1))),(0,3,1,2))
+        return X
+    
+
+class lon_encoder(nn.Module):
+    def __init__(self, in_c, out_c):
+        super().__init__()
+        self.conv = convolution(in_c, out_c)
+        
+    def forward(self, data):
+        x = self.conv(data)
+        return x
+    
+
+class LON(nn.Module):
+    def __init__(self, nKernels, nBins, nOut):
+        super().__init__()
+        self.convs = nn.ModuleList([Hist(nBins) for i in range(nKernels)])
+        self.lin = nn.Linear(nKernels*nBins,nOut)
+
+    def forward(self, X):
+        X = [h(X) for h in self.convs]
+        X = torch.cat(X,1)
+        X = torch.permute(self.lin(torch.permute(X,(0,2,3,1))),(0,3,1,2))
+        return X
+    
+class LON_UNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.pool = nn.MaxPool2d((2,2))
+        
+        """ Encoding """
+        self.en1 = LON(2,10,64)
+        self.en2 = lon_encoder(64, 128)
+        self.en3 = lon_encoder(128, 256)
+        self.en4 = lon_encoder(256, 512)
+
+        
+        # """ Bottleneck """
+        self.bottle = convolution(512, 1024)
+        
+        # """ Decoding """
+        self.de1 = decoder(1024, 512)
+        self.de2 = decoder(512, 256)
+        self.de3 = decoder(256, 128)
+        self.de4 = decoder(128, 64)
+        
+        """ Classifier """
+        self.last = nn.Conv2d(64, 1, kernel_size=1, padding=0)
+        
+    
+    def forward(self, data):
+        """ Encoding """
+        s1 = self.en1(data)
+        p1 = self.pool(s1)
+        s2 = self.en2(p1)
+        p2 = self.pool(s2)
+        s3 = self.en3(p2)
+        p3 = self.pool(s3)
+        s4 = self.en4(p3)
+        p4 = self.pool(s4)
+        
+        """ Bottleneck """
+        b = self.bottle(p4)
+        
+        """ Decoding """
+        d1 = self.de1(b, s4)
+        d2 = self.de2(d1, s3)
+        d3 = self.de3(d2, s2)
+        d4 = self.de4(d3, s1)
+        
+        """ Classifier """
+        outs = self.last(d4)
+        
+        return torch.sigmoid(outs)
