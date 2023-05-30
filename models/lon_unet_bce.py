@@ -17,19 +17,15 @@ from PIL import Image
 import numpy as np
 from matplotlib import pyplot as plt
 
-from torchvision.models import ConvNeXt_Tiny_Weights
-
-model_tiny = torchvision.models.convnext_tiny(weights=ConvNeXt_Tiny_Weights.DEFAULT)
-
 #############################################################################################################################
 
 # train the model?
 
-should_train = False
+should_train = True
 
-path_to_trained_model = 'lon_unet_models_normal_batch_bce/trained_lon_unet_model.pth'
-path_to_train_loss = 'lon_unet_models_normal_batch_bce/lon_unet_train_losses.txt'
-path_to_val_loss = 'lon_unet_models_normal_batch_bce/lon_unet_val_losses.txt'
+path_to_trained_model = 'lon_unet_models/trained_lon_unet_model_bce.pth'
+path_to_train_loss = 'lon_unet_models/lon_unet_train_losses_bce.txt'
+path_to_val_loss = 'lon_unet_models/lon_unet_val_losses_bce.txt'
 
 
 #############################################################################################################################
@@ -291,7 +287,7 @@ def train_until_convergence(model, train_set, val_set, epochs, patience):
         time_diff = end_time - start_time
 
         if (epoch%50==0): #save every model every 50th iter
-            torch.save(model.state_dict(), f'lon_unet_models_normal_batch_bce/lon_unet_model_epoch_{epoch+1}.pth' )
+            torch.save(model.state_dict(), f'lon_unet_models/lon_unet_model_bce_epoch_{epoch+1}.pth' )
 
         if val_loss < best_val_loss:
             best_val_loss = val_loss
@@ -376,7 +372,6 @@ concat_batch_test_images = concat_batch(test_images)
 concat_batch_test_labels = concat_batch(test_labels)
 concat_batch_test_outputs = concat_batch(test_outputs)
 
-print('concat_batch_test_images[0].shape:', concat_batch_test_images[0].shape)
 
 # todo reconstruct images.
 def reconstruct(list_of_batches, orig_size):
@@ -407,7 +402,7 @@ for i in range(len(re_test_images)):
     ax[1].set_title('ground truth')
     ax[2].imshow(re_test_outputs[i], cmap='gray')
     ax[2].set_title('prediction')
-    plt.savefig(f'lon_unet_models_normal_batch_bce/lon_unet_test_result{i}.png', dpi=500, bbox_inches='tight')
+    plt.savefig(f'lon_unet_models/lon_unet_bce_test_result_{i}.png', dpi=500, bbox_inches='tight')
     plt.close()
     plt.show()
 
@@ -421,7 +416,7 @@ plt.plot(loss_x, train_losses, label='Train loss')
 plt.plot(loss_x, val_losses, label='Validation loss')
 plt.title('Train / Validation loss')
 plt.legend()
-plt.savefig(f'lon_unet_models_normal_batch_bce/lon_unet_train_val_loss.png', dpi=500, bbox_inches='tight')
+plt.savefig(f'lon_unet_models/lon_unet_train_val_loss_bce.png', dpi=500, bbox_inches='tight')
 plt.close()
 
 predictions = torch.stack(re_test_outputs)
@@ -438,16 +433,14 @@ auc = roc_auc_score(labels.int().view(-1).numpy(), predictions.view(-1).numpy())
 plt.title('U-Net BCE ROC curve')
 plt.plot(fpr, tpr, label=f'AUC score = {auc}')
 plt.legend()
-plt.savefig('unet_models/roc_curve_bce.png', dpi=500, bbox_inches='tight')
+plt.savefig('lon_unet_models/roc_curve_bce.png', dpi=500, bbox_inches='tight')
 plt.close()
 
 predictions = (predictions > 0.5).float()
 
-print("U-Net LON 90 images. normal batch. BCE")
+print("U-Net LON BCE")
 
 accuracy = torch.eq(predictions, labels).sum().item() / len(predictions)
-# with open(f'unet_conv_models/unet_conv_accuracy_bce.txt', 'w') as f:
-#     f.write("%s\n" % accuracy)
 print("accuracy:", accuracy)
 
 def calculate_iou(pred, target):
